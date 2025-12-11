@@ -29,6 +29,22 @@ interface DeFiRecommendation {
   token: string;
 }
 
+interface ScheduledPayment {
+  id: string;
+  name: string;
+  amount: number;
+  frequency: 'Monthly' | 'Yearly' | 'Weekly';
+  nextPaymentDate: Date;
+  category: string;
+  history: PaymentHistory[];
+}
+
+interface PaymentHistory {
+  date: Date;
+  amount: number;
+  status: 'completed' | 'pending' | 'failed';
+}
+
 export default function CryptoPortfolio() {
   const [holdings, setHoldings] = useState<CryptoHolding[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,6 +54,15 @@ export default function CryptoPortfolio() {
   const [isLoadingPrices, setIsLoadingPrices] = useState(false);
   const [recommendations, setRecommendations] = useState<DeFiRecommendation[]>([]);
   const [dismissedRecommendations, setDismissedRecommendations] = useState<Set<string>>(new Set());
+  const [scheduledPayments, setScheduledPayments] = useState<ScheduledPayment[]>([]);
+  const [isAddingPayment, setIsAddingPayment] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<string | null>(null);
+  const [newPayment, setNewPayment] = useState({
+    name: '',
+    amount: '',
+    frequency: 'Monthly' as 'Monthly' | 'Yearly' | 'Weekly',
+    category: 'Subscription'
+  });
 
   // Load holdings from localStorage on mount
   useEffect(() => {
@@ -50,6 +75,65 @@ export default function CryptoPortfolio() {
         console.error('Failed to load holdings:', e);
       }
     }
+
+    // Load scheduled payments
+    const savedPayments = localStorage.getItem('scheduledPayments');
+    if (savedPayments) {
+      try {
+        const parsed = JSON.parse(savedPayments);
+        // Convert date strings back to Date objects
+        const paymentsWithDates = parsed.map((p: any) => ({
+          ...p,
+          nextPaymentDate: new Date(p.nextPaymentDate),
+          history: p.history.map((h: any) => ({
+            ...h,
+            date: new Date(h.date)
+          }))
+        }));
+        setScheduledPayments(paymentsWithDates);
+      } catch (e) {
+        console.error('Failed to load payments:', e);
+      }
+    } else {
+      // Initialize with mock data
+      const mockPayments: ScheduledPayment[] = [
+        {
+          id: '1',
+          name: 'Netflix',
+          amount: 15.99,
+          frequency: 'Monthly',
+          nextPaymentDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), // 5 days from now
+          category: 'Entertainment',
+          history: [
+            { date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), amount: 15.99, status: 'completed' },
+            { date: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), amount: 15.99, status: 'completed' }
+          ]
+        },
+        {
+          id: '2',
+          name: 'Spotify',
+          amount: 9.99,
+          frequency: 'Monthly',
+          nextPaymentDate: new Date(Date.now() + 12 * 24 * 60 * 60 * 1000), // 12 days from now
+          category: 'Entertainment',
+          history: [
+            { date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), amount: 9.99, status: 'completed' }
+          ]
+        },
+        {
+          id: '3',
+          name: 'AWS Hosting',
+          amount: 50.00,
+          frequency: 'Monthly',
+          nextPaymentDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 2 days from now
+          category: 'Business',
+          history: [
+            { date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), amount: 50.00, status: 'completed' }
+          ]
+        }
+      ];
+      setScheduledPayments(mockPayments);
+    }
   }, []);
 
   // Save holdings to localStorage whenever they change
@@ -58,6 +142,13 @@ export default function CryptoPortfolio() {
       localStorage.setItem('cryptoHoldings', JSON.stringify(holdings));
     }
   }, [holdings]);
+
+  // Save scheduled payments to localStorage
+  useEffect(() => {
+    if (scheduledPayments.length > 0) {
+      localStorage.setItem('scheduledPayments', JSON.stringify(scheduledPayments));
+    }
+  }, [scheduledPayments]);
 
   // Fetch prices for all holdings
   useEffect(() => {
@@ -292,6 +383,84 @@ export default function CryptoPortfolio() {
     }
   };
 
+  // Payment scheduling functions
+  const addScheduledPayment = () => {
+    if (!newPayment.name || !newPayment.amount) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    const payment: ScheduledPayment = {
+      id: Date.now().toString(),
+      name: newPayment.name,
+      amount: parseFloat(newPayment.amount),
+      frequency: newPayment.frequency,
+      nextPaymentDate: calculateNextPaymentDate(newPayment.frequency),
+      category: newPayment.category,
+      history: []
+    };
+
+    setScheduledPayments(prev => [...prev, payment]);
+    setNewPayment({ name: '', amount: '', frequency: 'Monthly', category: 'Subscription' });
+    setIsAddingPayment(false);
+  };
+
+  const calculateNextPaymentDate = (frequency: 'Monthly' | 'Yearly' | 'Weekly') => {
+    const now = new Date();
+    switch (frequency) {
+      case 'Weekly':
+        return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      case 'Monthly':
+        return new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+      case 'Yearly':
+        return new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+      default:
+        return now;
+    }
+  };
+
+  const updatePayment = (id: string, updates: Partial<ScheduledPayment>) => {
+    setScheduledPayments(prev => prev.map(p => 
+      p.id === id ? { ...p, ...updates } : p
+    ));
+    setEditingPayment(null);
+  };
+
+  const deletePayment = (id: string) => {
+    setScheduledPayments(prev => prev.filter(p => p.id !== id));
+  };
+
+  const simulatePayment = (id: string) => {
+    setScheduledPayments(prev => prev.map(p => {
+      if (p.id === id) {
+        const newHistory: PaymentHistory = {
+          date: new Date(),
+          amount: p.amount,
+          status: 'completed'
+        };
+        return {
+          ...p,
+          history: [newHistory, ...p.history],
+          nextPaymentDate: calculateNextPaymentDate(p.frequency)
+        };
+      }
+      return p;
+    }));
+  };
+
+  const getDaysUntilPayment = (date: Date) => {
+    const now = new Date();
+    const diff = date.getTime() - now.getTime();
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return days;
+  };
+
+  const getPaymentUrgency = (days: number) => {
+    if (days <= 2) return 'bg-red-500/20 border-red-500/50 text-red-300';
+    if (days <= 7) return 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300';
+    return 'bg-green-500/20 border-green-500/50 text-green-300';
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
@@ -499,6 +668,270 @@ export default function CryptoPortfolio() {
           </div>
         )}
 
+        {/* Payment Scheduling Section */}
+        <div className="mt-12">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-orange-400 to-pink-400 bg-clip-text text-transparent">
+                💳 Payment Scheduling
+              </h2>
+              <p className="text-slate-300">Track and manage your recurring payments</p>
+            </div>
+            <button
+              onClick={() => setIsAddingPayment(!isAddingPayment)}
+              className="bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 text-white font-medium py-2 px-6 rounded-lg transition-all"
+            >
+              {isAddingPayment ? 'Cancel' : '+ Add Payment'}
+            </button>
+          </div>
+
+          {/* Add Payment Form */}
+          {isAddingPayment && (
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 mb-6">
+              <h3 className="text-lg font-semibold mb-4">Add New Payment</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-slate-300 block mb-2">Subscription Name</label>
+                  <input
+                    type="text"
+                    value={newPayment.name}
+                    onChange={(e) => setNewPayment({ ...newPayment, name: e.target.value })}
+                    placeholder="e.g., Netflix, Spotify"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-slate-300 block mb-2">Amount ($)</label>
+                  <input
+                    type="number"
+                    value={newPayment.amount}
+                    onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
+                    placeholder="0.00"
+                    step="0.01"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-slate-300 block mb-2">Frequency</label>
+                  <select
+                    value={newPayment.frequency}
+                    onChange={(e) => setNewPayment({ ...newPayment, frequency: e.target.value as any })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="Weekly">Weekly</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Yearly">Yearly</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm text-slate-300 block mb-2">Category</label>
+                  <input
+                    type="text"
+                    value={newPayment.category}
+                    onChange={(e) => setNewPayment({ ...newPayment, category: e.target.value })}
+                    placeholder="e.g., Entertainment, Business"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={addScheduledPayment}
+                className="mt-4 bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 text-white font-medium py-2 px-6 rounded-lg transition-all"
+              >
+                Add Payment
+              </button>
+            </div>
+          )}
+
+          {/* Payments List */}
+          {scheduledPayments.length === 0 ? (
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-12 text-center border border-white/10">
+              <div className="text-6xl mb-4">📅</div>
+              <h3 className="text-xl font-semibold mb-2">No Scheduled Payments</h3>
+              <p className="text-slate-400">Add your recurring subscriptions and payments to track them</p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {scheduledPayments.map((payment) => {
+                const daysUntil = getDaysUntilPayment(payment.nextPaymentDate);
+                const urgencyClass = getPaymentUrgency(daysUntil);
+                const isEditing = editingPayment === payment.id;
+
+                return (
+                  <div
+                    key={payment.id}
+                    className={`bg-white/10 backdrop-blur-lg rounded-xl p-6 border transition-all ${urgencyClass}`}
+                  >
+                    {isEditing ? (
+                      // Edit Mode
+                      <div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div>
+                            <label className="text-xs text-slate-300 block mb-1">Name</label>
+                            <input
+                              type="text"
+                              value={payment.name}
+                              onChange={(e) => updatePayment(payment.id, { name: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-300 block mb-1">Amount</label>
+                            <input
+                              type="number"
+                              value={payment.amount}
+                              onChange={(e) => updatePayment(payment.id, { amount: parseFloat(e.target.value) })}
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-300 block mb-1">Frequency</label>
+                            <select
+                              value={payment.frequency}
+                              onChange={(e) => updatePayment(payment.id, { frequency: e.target.value as any })}
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            >
+                              <option value="Weekly">Weekly</option>
+                              <option value="Monthly">Monthly</option>
+                              <option value="Yearly">Yearly</option>
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setEditingPayment(null)}
+                          className="bg-green-500 hover:bg-green-600 text-white text-sm font-medium py-1 px-4 rounded-lg transition-all"
+                        >
+                          Done Editing
+                        </button>
+                      </div>
+                    ) : (
+                      // View Mode
+                      <div>
+                        <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <h3 className="text-2xl font-bold mb-1">{payment.name}</h3>
+                            <div className="flex items-center gap-2 text-sm text-slate-300">
+                              <span className="bg-white/10 px-2 py-1 rounded">{payment.category}</span>
+                              <span>•</span>
+                              <span>{payment.frequency}</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setEditingPayment(payment.id)}
+                              className="text-blue-400 hover:text-blue-300 text-sm px-3 py-1 rounded-lg hover:bg-blue-500/10 transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deletePayment(payment.id)}
+                              className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded-lg hover:bg-red-500/10 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div>
+                            <div className="text-xs text-slate-400 mb-1">Amount</div>
+                            <div className="text-2xl font-bold text-orange-400">
+                              ${payment.amount.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-slate-400 mb-1">Next Payment</div>
+                            <div className="text-lg font-semibold">
+                              {payment.nextPaymentDate.toLocaleDateString()}
+                            </div>
+                            <div className="text-sm text-slate-400">
+                              {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `in ${daysUntil} days`}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-slate-400 mb-1">Payment History</div>
+                            <div className="text-lg font-semibold">
+                              {payment.history.length} payment{payment.history.length !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Payment History */}
+                        {payment.history.length > 0 && (
+                          <div className="mb-4">
+                            <div className="text-xs text-slate-400 mb-2">Recent Payments</div>
+                            <div className="space-y-2">
+                              {payment.history.slice(0, 3).map((hist, idx) => (
+                                <div key={idx} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 text-sm">
+                                  <span className="text-slate-300">{hist.date.toLocaleDateString()}</span>
+                                  <span className="text-slate-300">${hist.amount.toFixed(2)}</span>
+                                  <span className={`px-2 py-1 rounded text-xs ${
+                                    hist.status === 'completed' ? 'bg-green-500/20 text-green-300' :
+                                    hist.status === 'pending' ? 'bg-yellow-500/20 text-yellow-300' :
+                                    'bg-red-500/20 text-red-300'
+                                  }`}>
+                                    {hist.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Simulate Payment Button */}
+                        <button
+                          onClick={() => simulatePayment(payment.id)}
+                          className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-all"
+                        >
+                          Simulate Payment (Test)
+                        </button>
+
+                        {/* Reminder */}
+                        {daysUntil <= 7 && (
+                          <div className="mt-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 flex items-start gap-2">
+                            <span className="text-xl">⏰</span>
+                            <div className="flex-1">
+                              <div className="font-semibold text-yellow-300 text-sm">Payment Reminder</div>
+                              <div className="text-xs text-slate-300">
+                                Your {payment.name} payment of ${payment.amount.toFixed(2)} is due {daysUntil === 0 ? 'today' : daysUntil === 1 ? 'tomorrow' : `in ${daysUntil} days`}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Total Monthly Cost */}
+          {scheduledPayments.length > 0 && (
+            <div className="mt-6 bg-gradient-to-r from-orange-500/20 to-pink-500/20 border border-orange-500/30 rounded-xl p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-300 mb-1">Estimated Monthly Cost</div>
+                  <div className="text-3xl font-bold text-orange-300">
+                    ${scheduledPayments.reduce((sum, p) => {
+                      const monthlyAmount = p.frequency === 'Monthly' ? p.amount :
+                                          p.frequency === 'Yearly' ? p.amount / 12 :
+                                          p.amount * 4.33; // Weekly
+                      return sum + monthlyAmount;
+                    }, 0).toFixed(2)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-slate-300 mb-1">Total Payments</div>
+                  <div className="text-2xl font-bold text-pink-300">
+                    {scheduledPayments.length}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Footer Info */}
         <div className="mt-8 text-center text-sm text-slate-400">
           <p>Prices update automatically every minute • Data provided by CoinGecko</p>
@@ -508,6 +941,12 @@ export default function CryptoPortfolio() {
     </div>
   );
 }
+
+
+
+
+
+
 
 
 
